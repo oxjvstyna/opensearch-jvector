@@ -210,7 +210,7 @@ jobs:
 
       - name: Run build
         run: |
-          ./gradlew.bat test --tests JVectorMergeWithDeletedDocsTests.testMultipleMergesWithVariousDeletionPatterns -Dtests.iters=10 -Dtests.seed=196C27C1AD8E451A -Dtests.locale=sr-Latn-BA -Dtests.timezone=Africa/Nairobi -Dtests.asserts=true -Dtests.file.encoding=UTF-8
+          ./gradlew.bat test --tests JVectorMergeWithDeletedDocsTests.testMultipleMergesWithVariousDeletionPatterns '-Dtests.iters=10' '-Dtests.seed=196C27C1AD8E451A' '-Dtests.locale=sr-Latn-BA' '-Dtests.timezone=Africa/Nairobi' '-Dtests.asserts=true' '-Dtests.file.encoding=UTF-8'
 
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         if: always()
