@@ -727,7 +727,7 @@ public class JVectorMergeWithDeletedDocsTests extends LuceneTestCase {
             for (int i = 0; i < seg1Size; i++) {
                 Document doc = new Document();
                 float[] vector = new float[dimension];
-                Arrays.fill(vector, docId * 0.01f);
+                fillRandom(vector);
                 doc.add(new KnnFloatVectorField(TEST_FIELD, vector, VectorSimilarityFunction.EUCLIDEAN));
                 doc.add(new StringField(TEST_ID_FIELD, String.valueOf(docId), Field.Store.YES));
                 writer.addDocument(doc);
@@ -748,7 +748,7 @@ public class JVectorMergeWithDeletedDocsTests extends LuceneTestCase {
             for (int i = 0; i < seg2Size; i++) {
                 Document doc = new Document();
                 float[] vector = new float[dimension];
-                Arrays.fill(vector, docId * 0.01f);
+                fillRandom(vector);
                 doc.add(new KnnFloatVectorField(TEST_FIELD, vector, VectorSimilarityFunction.EUCLIDEAN));
                 doc.add(new StringField(TEST_ID_FIELD, String.valueOf(docId), Field.Store.YES));
                 writer.addDocument(doc);
@@ -760,7 +760,7 @@ public class JVectorMergeWithDeletedDocsTests extends LuceneTestCase {
             for (int i = seg2Start; i < seg2Start + 300; i++) {
                 Document doc = new Document();
                 float[] vector = new float[dimension];
-                Arrays.fill(vector, (i + 1000) * 0.01f); // Different vector values
+                fillRandom(vector);
                 doc.add(new KnnFloatVectorField(TEST_FIELD, vector, VectorSimilarityFunction.EUCLIDEAN));
                 doc.add(new StringField(TEST_ID_FIELD, String.valueOf(i), Field.Store.YES));
                 writer.updateDocument(new Term(TEST_ID_FIELD, String.valueOf(i)), doc);
@@ -780,7 +780,7 @@ public class JVectorMergeWithDeletedDocsTests extends LuceneTestCase {
             for (int i = 0; i < seg3Size; i++) {
                 Document doc = new Document();
                 float[] vector = new float[dimension];
-                Arrays.fill(vector, docId * 0.01f);
+                fillRandom(vector);
                 doc.add(new KnnFloatVectorField(TEST_FIELD, vector, VectorSimilarityFunction.EUCLIDEAN));
                 doc.add(new StringField(TEST_ID_FIELD, String.valueOf(docId), Field.Store.YES));
                 writer.addDocument(doc);
@@ -795,7 +795,7 @@ public class JVectorMergeWithDeletedDocsTests extends LuceneTestCase {
             for (int i = 0; i < seg4Size; i++) {
                 Document doc = new Document();
                 float[] vector = new float[dimension];
-                Arrays.fill(vector, docId * 0.01f);
+                fillRandom(vector);
                 doc.add(new KnnFloatVectorField(TEST_FIELD, vector, VectorSimilarityFunction.EUCLIDEAN));
                 doc.add(new StringField(TEST_ID_FIELD, String.valueOf(docId), Field.Store.YES));
                 writer.addDocument(doc);
@@ -810,7 +810,7 @@ public class JVectorMergeWithDeletedDocsTests extends LuceneTestCase {
             for (int i = seg4Start + 500; i < seg4Start + 700; i++) {
                 Document doc = new Document();
                 float[] vector = new float[dimension];
-                Arrays.fill(vector, (i + 2000) * 0.01f);
+                fillRandom(vector);
                 doc.add(new KnnFloatVectorField(TEST_FIELD, vector, VectorSimilarityFunction.EUCLIDEAN));
                 doc.add(new StringField(TEST_ID_FIELD, String.valueOf(i), Field.Store.YES));
                 writer.updateDocument(new Term(TEST_ID_FIELD, String.valueOf(i)), doc);
@@ -831,7 +831,7 @@ public class JVectorMergeWithDeletedDocsTests extends LuceneTestCase {
             for (int i = 0; i < seg5Size; i++) {
                 Document doc = new Document();
                 float[] vector = new float[dimension];
-                Arrays.fill(vector, docId * 0.01f);
+                fillRandom(vector);
                 doc.add(new KnnFloatVectorField(TEST_FIELD, vector, VectorSimilarityFunction.EUCLIDEAN));
                 doc.add(new StringField(TEST_ID_FIELD, String.valueOf(docId), Field.Store.YES));
                 writer.addDocument(doc);
@@ -843,7 +843,7 @@ public class JVectorMergeWithDeletedDocsTests extends LuceneTestCase {
             for (int i = seg5Start; i < seg5Start + seg5Size; i++) {
                 Document doc = new Document();
                 float[] vector = new float[dimension];
-                Arrays.fill(vector, (i + 3000) * 0.01f);
+                fillRandom(vector);
                 doc.add(new KnnFloatVectorField(TEST_FIELD, vector, VectorSimilarityFunction.EUCLIDEAN));
                 doc.add(new StringField(TEST_ID_FIELD, String.valueOf(i), Field.Store.YES));
                 writer.updateDocument(new Term(TEST_ID_FIELD, String.valueOf(i)), doc);
@@ -858,7 +858,7 @@ public class JVectorMergeWithDeletedDocsTests extends LuceneTestCase {
             for (int i = 0; i < seg6Size; i++) {
                 Document doc = new Document();
                 float[] vector = new float[dimension];
-                Arrays.fill(vector, docId * 0.01f);
+                fillRandom(vector);
                 doc.add(new KnnFloatVectorField(TEST_FIELD, vector, VectorSimilarityFunction.EUCLIDEAN));
                 doc.add(new StringField(TEST_ID_FIELD, String.valueOf(docId), Field.Store.YES));
                 writer.addDocument(doc);
@@ -880,7 +880,7 @@ public class JVectorMergeWithDeletedDocsTests extends LuceneTestCase {
             for (int i = 0; i < seg7Size; i++) {
                 Document doc = new Document();
                 float[] vector = new float[dimension];
-                Arrays.fill(vector, docId * 0.01f);
+                fillRandom(vector);
                 doc.add(new KnnFloatVectorField(TEST_FIELD, vector, VectorSimilarityFunction.EUCLIDEAN));
                 doc.add(new StringField(TEST_ID_FIELD, String.valueOf(docId), Field.Store.YES));
                 writer.addDocument(doc);
@@ -892,7 +892,7 @@ public class JVectorMergeWithDeletedDocsTests extends LuceneTestCase {
             for (int i = seg7Start; i < seg7Start + 1000; i++) {
                 Document doc = new Document();
                 float[] vector = new float[dimension];
-                Arrays.fill(vector, (i + 4000) * 0.01f);
+                fillRandom(vector);
                 doc.add(new KnnFloatVectorField(TEST_FIELD, vector, VectorSimilarityFunction.EUCLIDEAN));
                 doc.add(new StringField(TEST_ID_FIELD, String.valueOf(i), Field.Store.YES));
                 writer.updateDocument(new Term(TEST_ID_FIELD, String.valueOf(i)), doc);
@@ -932,7 +932,7 @@ public class JVectorMergeWithDeletedDocsTests extends LuceneTestCase {
 
                 // Verify search works correctly
                 final float[] target = new float[dimension];
-                Arrays.fill(target, 0.5f);
+                fillRandom(target);
                 final IndexSearcher searcher = newSearcher(reader);
                 JVectorKnnFloatVectorQuery query = getJVectorKnnFloatVectorQuery(TEST_FIELD, target, k, new MatchAllDocsQuery());
                 TopDocs topDocs = searcher.search(query, k);
@@ -1892,6 +1892,13 @@ public class JVectorMergeWithDeletedDocsTests extends LuceneTestCase {
                     log.info("Result {}: doc ID = {}", i, id);
                 }
             }
+        }
+    }
+
+    /** Fills the vector with random components in [-1, 1), so that vectors are not collinear. */
+    private void fillRandom(float[] vector) {
+        for (int i = 0; i < vector.length; i++) {
+            vector[i] = random().nextFloat() * 2 - 1;
         }
     }
 
