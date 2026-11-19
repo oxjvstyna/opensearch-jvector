@@ -1017,9 +1017,10 @@ public class JVectorWriter extends KnnVectorsWriter {
          * This process includes handling product quantization (PQ) for vector compression,
          * generating ord-to-doc mappings, and writing the merged index into a new segment file.
          * <p>
-         * When the graph is rebuilt from scratch, new codebooks and compressed vectors are computed
-         * from all live vectors if the leading reader already had codebooks or the total vector count
-         * meets the required minimum threshold. Otherwise, no PQ compression is applied.
+         * When the graph is rebuilt from scratch and the leading reader has codebooks, they are reused unless
+         * the other readers hold too many live vectors relative to the leading reader; then new codebooks are
+         * computed from all live vectors. If the leading reader has no codebooks, new ones are computed when the
+         * total vector count meets the required minimum threshold. Otherwise, no PQ compression is applied.
          * <p>
          * Also, it generates a mapping of ordinals to document IDs by iterating through
          * the provided vector data, which is further used to write the field data.
@@ -1088,8 +1089,19 @@ public class JVectorWriter extends KnnVectorsWriter {
         }
 
         /**
-         * PQ merge: performs a leading segment merge when possible. Otherwise the graph is rebuilt from scratch and the PQ
-         * codebooks are trained from scratch on all live vectors of the merge (or full-precision vectors are used).
+         * True when the other readers hold too many live vectors relative to the leading reader for the leading reader's
+         * PQ codebooks to still represent them well.
+         */
+        private boolean hasTooManyNewVectorsForLeadingCodebooks() {
+            return totalLiveVectorsInOtherReaders / (double) totalLiveVectorsInLeadingReader > MAX_PQ_OTHER_TO_LEADING_VECTOR_RATIO;
+        }
+
+        /**
+         * PQ merge: performs a leading segment merge when possible. Otherwise the graph is rebuilt from scratch:
+         * the leading reader's codebooks are reused to encode all vectors, unless the other readers hold too many
+         * live vectors relative to the leading reader ({@link #MAX_PQ_OTHER_TO_LEADING_VECTOR_RATIO}), in which case
+         * new codebooks are trained on all live vectors. Without leading codebooks, new ones are trained when the live
+         * vector count meets the minimum threshold, otherwise full-precision vectors are used.
          */
         private void mergePQ(RemappedRandomAccessVectorValues compactRavv) throws IOException {
             final String fieldName = fieldInfo.name;
@@ -1108,9 +1120,17 @@ public class JVectorWriter extends KnnVectorsWriter {
 
             boolean ok = tryLeadingSegmentMerge(leadingCompressor);
             if (!ok) {
-                // The leading reader's codebooks are not reused: they were trained on that segment only and may not represent
-                // the other segments' vectors well. Retrain on all live vectors, since the graph is rebuilt from scratch.
-                if (leadingCompressor != null || totalLiveVectorsCount >= minimumBatchSizeForQuantization) {
+                if (leadingCompressor != null && !hasTooManyNewVectorsForLeadingCodebooks()) {
+                    // Few new vectors: the leading reader's codebooks still represent the data, so reuse them.
+                    log.info(
+                        "Pre-existing PQ codebooks found in this merge for field {} in segment {}, will encode all vectors with the leading reader's codebooks",
+                        fieldName,
+                        mergeState.segmentInfo.name
+                    );
+                    compactPqVectors = PQVectors.encodeAndBuild(leadingCompressor, compactRavv.size(), compactRavv, simdPoolMerge);
+                } else if (leadingCompressor != null || totalLiveVectorsCount >= minimumBatchSizeForQuantization) {
+                    // Too many new vectors for the leading reader's codebooks (trained on that segment only), or no
+                    // codebooks yet: train new ones on all live vectors.
                     log.info(
                         "Calculating new codebooks and compressed vectors for field: {} in segment {}, with totalLiveVectorCount: {}, minimumBatchSizeForQuantization: {}, pre-existing codebooks: {}",
                         fieldName,
@@ -1238,8 +1258,7 @@ public class JVectorWriter extends KnnVectorsWriter {
                     }
 
                     if (leadingCompressor != null) {
-                        var leadingSegmentLiveVectorsFactor = totalLiveVectorsInOtherReaders / (double) totalLiveVectorsInLeadingReader;
-                        if (leadingSegmentLiveVectorsFactor > MAX_PQ_OTHER_TO_LEADING_VECTOR_RATIO) {
+                        if (hasTooManyNewVectorsForLeadingCodebooks()) {
                             log.warn(
                                 "Leading segment does not contain sufficient live vectors to preserve the recall ({} / {}). "
                                     + "Will skip leading segment merge. (totalLiveVectors={})",
