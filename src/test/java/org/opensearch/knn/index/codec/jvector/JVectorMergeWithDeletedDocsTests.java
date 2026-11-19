@@ -711,7 +711,9 @@ public class JVectorMergeWithDeletedDocsTests extends LuceneTestCase {
 
         IndexWriterConfig config = newIndexWriterConfig();
         config.setUseCompoundFile(false);
-        config.setCodec(getCodec(randomFrom(1, 1024), random().nextBoolean())); // Enable PQ
+        // Enable PQ. Leading segment merge is disabled so every merge rebuilds the graph from scratch (see #714):
+        // this test exercises the rebuild path with collinear vectors, not the leading segment merge path.
+        config.setCodec(getCodec(randomFrom(1, 1024), true, random().nextBoolean()));
         config.setMergePolicy(new ForceMergesOnlyMergePolicy());
         config.setMergeScheduler(new SerialMergeScheduler());
 
