@@ -1092,7 +1092,6 @@ public class JVectorWriter extends KnnVectorsWriter {
          * codebooks are trained from scratch on all live vectors of the merge (or full-precision vectors are used).
          */
         private void mergePQ(RemappedRandomAccessVectorValues compactRavv) throws IOException {
-            final int totalVectorsCount = size;
             final String fieldName = fieldInfo.name;
             final PQVectors compactPqVectors;
             // Get the leading reader
@@ -1109,9 +1108,8 @@ public class JVectorWriter extends KnnVectorsWriter {
 
             boolean ok = tryLeadingSegmentMerge(leadingCompressor);
             if (!ok) {
-                // The leading reader's codebooks are not reused here: they were trained on that segment only, and vectors of
-                // the other segments that fall outside their training range collapse onto identical PQ codes. Identical codes
-                // produce tied approximate scores, which prune the graph built below and make the search return fewer than k.
+                // The leading reader's codebooks are not reused: they were trained on that segment only and may not represent
+                // the other segments' vectors well. Retrain on all live vectors, since the graph is rebuilt from scratch.
                 if (leadingCompressor != null || totalLiveVectorsCount >= minimumBatchSizeForQuantization) {
                     log.info(
                         "Calculating new codebooks and compressed vectors for field: {} in segment {}, with totalLiveVectorCount: {}, minimumBatchSizeForQuantization: {}, pre-existing codebooks: {}",
@@ -1129,9 +1127,9 @@ public class JVectorWriter extends KnnVectorsWriter {
                     );
                 } else {
                     log.info(
-                        "Not enough vectors found for field: {}, totalVectorCount: {}, is below minimumBatchSizeForQuantization: {}",
+                        "Not enough live vectors found for field: {}, totalLiveVectorCount: {}, is below minimumBatchSizeForQuantization: {}",
                         fieldName,
-                        totalVectorsCount,
+                        totalLiveVectorsCount,
                         minimumBatchSizeForQuantization
                     );
                     compactPqVectors = null;
