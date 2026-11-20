@@ -9,10 +9,13 @@ import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.io.UnsupportedEncodingException;
 import java.time.Clock;
+import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Optional;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ForkJoinPool;
 import java.util.stream.IntStream;
 
@@ -30,6 +33,7 @@ import org.apache.lucene.index.IndexWriter;
 import org.apache.lucene.index.KnnVectorValues;
 import org.apache.lucene.index.MergePolicy;
 import org.apache.lucene.index.MergeState;
+import org.apache.lucene.index.SegmentInfo;
 import org.apache.lucene.index.SegmentWriteState;
 import org.apache.lucene.index.Sorter;
 import org.apache.lucene.index.VectorEncoding;
@@ -41,9 +45,11 @@ import org.apache.lucene.util.Bits;
 import org.apache.lucene.util.IORunnable;
 import org.apache.lucene.util.IOUtils;
 import org.apache.lucene.util.RamUsageEstimator;
+import org.apache.lucene.util.StringHelper;
 import org.opensearch.knn.plugin.stats.KNNCounter;
 
 import io.github.jbellis.jvector.graph.GraphIndexBuilder;
+import io.github.jbellis.jvector.graph.GraphSearcher;
 import io.github.jbellis.jvector.graph.ListRandomAccessVectorValues;
 import io.github.jbellis.jvector.graph.OnHeapGraphIndex;
 import io.github.jbellis.jvector.graph.RandomAccessVectorValues;
@@ -101,6 +107,9 @@ import lombok.extern.log4j.Log4j2;
 public class JVectorWriter extends KnnVectorsWriter {
     private static final long SHALLOW_RAM_BYTES_USED = RamUsageEstimator.shallowSizeOfInstance(JVectorWriter.class);
     private static final int MERGE_ABORT_CHECK_NUM_ORDINALS = 1000;
+    // Diagnostics only: segment id -> merge lineage. Never read by production logic.
+    // shortcut: unbounded static map, fine for a debug branch; remove together with the lineage logging.
+    private static final java.util.Map<String, String> MERGE_LINEAGE = new ConcurrentHashMap<>();
     private static final int MERGE_ABORT_CHECK_THRESHOLD_FOR_SMALL_GRAPHS = 5000;
 
     private final List<FieldWriter<?>> fields = new ArrayList<>();
@@ -358,6 +367,147 @@ public class JVectorWriter extends KnnVectorsWriter {
         writeScoreCacheFile(fieldInfo, graph);
     }
 
+    /**
+     * Diagnostics only (see #714): logs structural health of the graph right before it is written, so a later wrong search
+     * result can be matched against a graph that was already broken at write time. Never throws.
+     * Reports: nodes, deleted-but-present nodes, zero-degree nodes, edges to missing nodes, nodes reachable from the entry node
+     * on level 0, and a probe of exact searches (k=5) using the graph's own vectors as queries.
+     * Join with the "MERGE DONE ... lineage" log line via the segment name.
+     */
+    private void logGraphHealth(OnHeapGraphIndex graph, RandomAccessVectorValues ravv, FieldInfo fieldInfo) {
+        try {
+            final int upper = graph.getIdUpperBound();
+            int nodes = 0;
+            int zeroDegree = 0;
+            long danglingEdges = 0;
+            long edges = 0;
+            for (int n = 0; n < upper; n++) {
+                if (!graph.containsNode(n)) {
+                    continue;
+                }
+                nodes++;
+                var it = graph.getNeighborsIterator(0, n);
+                int degree = 0;
+                while (it.hasNext()) {
+                    final int nb = it.nextInt();
+                    degree++;
+                    if (nb < 0 || nb >= upper || !graph.containsNode(nb)) {
+                        danglingEdges++;
+                    }
+                }
+                edges += degree;
+                if (degree == 0) {
+                    zeroDegree++;
+                }
+            }
+            if (nodes == 0) {
+                return;
+            }
+
+            // BFS over level 0 from the entry node: this is what a search can possibly reach
+            int reachable = -1;
+            final var entry = graph.entryNode();
+            if (entry != null && entry.node >= 0 && entry.node < upper) {
+                final boolean[] seen = new boolean[upper];
+                final ArrayDeque<Integer> queue = new ArrayDeque<>();
+                seen[entry.node] = true;
+                queue.add(entry.node);
+                reachable = 0;
+                while (!queue.isEmpty()) {
+                    final int cur = queue.poll();
+                    reachable++;
+                    var it = graph.getNeighborsIterator(0, cur);
+                    while (it.hasNext()) {
+                        final int nb = it.nextInt();
+                        if (nb >= 0 && nb < upper && !seen[nb] && graph.containsNode(nb)) {
+                            seen[nb] = true;
+                            queue.add(nb);
+                        }
+                    }
+                }
+            }
+
+            // Probe: exact searches using ~20 of the graph's own vectors as queries
+            final int k = Math.min(5, nodes);
+            final int step = Math.max(1, nodes / 20);
+            int probes = 0;
+            int shortResults = 0;
+            int selfMissing = 0;
+            int allEqualScores = 0;
+            int probeErrors = 0;
+            int minResults = Integer.MAX_VALUE;
+            int seenNodes = 0;
+            for (int n = 0; n < upper; n++) {
+                if (!graph.containsNode(n) || seenNodes++ % step != 0) {
+                    continue;
+                }
+                probes++;
+                try {
+                    // copy: the reader may hand out a shared buffer
+                    final VectorFloat<?> query = ravv.getVector(n).copy();
+                    final var result = GraphSearcher.search(
+                        query,
+                        k,
+                        ravv,
+                        getVectorSimilarityFunction(fieldInfo),
+                        graph,
+                        io.github.jbellis.jvector.util.Bits.ALL
+                    );
+                    final var found = result.getNodes();
+                    minResults = Math.min(minResults, found.length);
+                    if (found.length < k) {
+                        shortResults++;
+                    }
+                    final HashSet<Float> distinctScores = new HashSet<>();
+                    boolean self = false;
+                    for (var ns : found) {
+                        distinctScores.add(ns.score);
+                        self |= ns.node == n;
+                    }
+                    if (!self) {
+                        selfMissing++;
+                    }
+                    if (found.length > 1 && distinctScores.size() == 1) {
+                        allEqualScores++;
+                    }
+                } catch (Exception e) {
+                    probeErrors++;
+                }
+            }
+            final boolean unhealthy = (reachable >= 0 && reachable < nodes)
+                || danglingEdges > 0
+                || shortResults > 0
+                || selfMissing > 0
+                || allEqualScores > 0
+                || probeErrors > 0;
+            log.info(
+                "GRAPH HEALTH{} segment={} field={} nodes={} idUpperBound={} deletedStillInGraph={} zeroDegree={} avgDegree={} "
+                    + "danglingEdges={} reachableFromEntry={} (unreachable={}) | probes={} k={} minResults={} shortResults={} "
+                    + "selfMissing={} allEqualScores={} probeErrors={}",
+                unhealthy ? " UNHEALTHY" : " ok",
+                segmentWriteState.segmentInfo.name,
+                fieldInfo.name,
+                nodes,
+                upper,
+                graph.getDeletedNodes().cardinality(),
+                zeroDegree,
+                String.format("%.2f", edges / (double) nodes),
+                danglingEdges,
+                reachable,
+                reachable < 0 ? "?" : String.valueOf(nodes - reachable),
+                probes,
+                k,
+                minResults == Integer.MAX_VALUE ? -1 : minResults,
+                shortResults,
+                selfMissing,
+                allEqualScores,
+                probeErrors
+            );
+        } catch (Throwable t) {
+            log.warn("GRAPH HEALTH check failed for segment {}", segmentWriteState.segmentInfo.name, t);
+        }
+    }
+
     private void writeScoreCacheFile(FieldInfo fieldInfo, OnHeapGraphIndex graph) throws IOException {
         log.info("Writing neighbors score cache for field {}", fieldInfo.name);
         final String neighborsScoreCacheIndexFieldFileName = baseDataFileName
@@ -401,6 +551,7 @@ public class JVectorWriter extends KnnVectorsWriter {
         PQVectors auxiliaryPqVectors,
         GraphNodeIdToDocMap graphNodeIdToDocMap
     ) throws IOException {
+        logGraphHealth(graph, randomAccessVectorValues, fieldInfo);
         // field data file, which contains the graph
         final String vectorIndexFieldFileName = baseDataFileName + "_" + fieldInfo.name + "." + JVectorFormat.VECTOR_INDEX_EXTENSION;
 
@@ -739,6 +890,8 @@ public class JVectorWriter extends KnnVectorsWriter {
 
         // Total number of live (non-deleted) documents
         private final int totalLiveDocsCount;
+        // Which merge path is currently running; only used for failure diagnostics in merge()
+        private volatile String mergePath = "NOT_LEADING_SEGMENT_MERGE (empty or NVQ merge)";
         // Total number of live vectors in leading reader
         private final int totalLiveVectorsInLeadingReader;
         // Total number of live vectors in all other readers
@@ -1032,6 +1185,64 @@ public class JVectorWriter extends KnnVectorsWriter {
          * @throws IOException if there is an issue during reading or writing vector data.
          */
         public void merge() throws IOException {
+            try {
+                doMerge();
+                // Diagnostics: if a search assertion fails after the merge, this shows which path produced the segment
+                // and the paths of all earlier merges the leading segment (and thus its graph) came from
+                final String lineage = recordLineage();
+                log.info(
+                    "MERGE DONE in path [{}] for segment {} on field {} (totalLiveVectors={}, liveInLeadingReader={}, liveInOtherReaders={}), lineage: {}",
+                    mergePath,
+                    segmentWriteState.segmentInfo.name,
+                    fieldInfo.name,
+                    totalLiveVectorsCount,
+                    totalLiveVectorsInLeadingReader,
+                    totalLiveVectorsInOtherReaders,
+                    lineage
+                );
+            } catch (Throwable t) {
+                // Diagnostics: tells whether a failed merge was running the leading segment merge path or a build-from-scratch path
+                log.error(
+                    "MERGE FAILED in path [{}] for segment {} on field {} (leadingSegmentMergeDisabled={}, totalLiveVectors={}, "
+                        + "liveInLeadingReader={}, liveInOtherReaders={}): {}",
+                    mergePath,
+                    segmentWriteState.segmentInfo.name,
+                    fieldInfo.name,
+                    leadingSegmentMergeDisabled,
+                    totalLiveVectorsCount,
+                    totalLiveVectorsInLeadingReader,
+                    totalLiveVectorsInOtherReaders,
+                    t.toString(),
+                    t
+                );
+                throw t;
+            }
+        }
+
+        /**
+         * Builds "thisSegment[path] <- leadingSegment[path] <- ..." following only the leading reader chain, because only the
+         * leading segment's graph is ever reused by leading segment merge. Segments never seen here were created by a flush.
+         */
+        private String recordLineage() {
+            String leadingLineage = "?";
+            try {
+                if (readers[LEADING_READER_IDX] instanceof PerFieldKnnVectorsFormat.FieldsReader fr
+                    && fr.getFieldReader(fieldInfo.name) instanceof JVectorReader jr) {
+                    final SegmentInfo leadingInfo = jr.getSegmentInfo();
+                    leadingLineage = MERGE_LINEAGE.getOrDefault(
+                        StringHelper.idToString(leadingInfo.getId()),
+                        leadingInfo.name + "[flush]"
+                    );
+                }
+            } catch (RuntimeException e) {
+                // diagnostics only, never fail a merge because of it
+            }
+            final String lineage = segmentWriteState.segmentInfo.name + "[" + mergePath + "] <- " + leadingLineage;
+            MERGE_LINEAGE.put(StringHelper.idToString(segmentWriteState.segmentInfo.getId()), lineage);
+            return lineage;
+        }
+
+        private void doMerge() throws IOException {
             final RemappedRandomAccessVectorValues compactRavvEarly = new RemappedRandomAccessVectorValues(this, compactOrdsToRavvOrds);
 
             // The merged segments ends up with no vectors (empty graph), nothing to merge there
@@ -1111,6 +1322,7 @@ public class JVectorWriter extends KnnVectorsWriter {
 
             boolean ok = tryLeadingSegmentMerge(leadingCompressor);
             if (!ok) {
+                mergePath = "FROM_SCRATCH (leading segment merge disabled or skipped)";
                 // Check if the leading reader has pre-existing PQ codebooks and if so, refine them with the remaining vectors
                 if (leadingCompressor == null) {
                     // No pre-existing codebooks, check if we have enough vectors to trigger quantization
@@ -1199,6 +1411,8 @@ public class JVectorWriter extends KnnVectorsWriter {
                 log.info("Leading segment merge is disabled, skipping");
                 return false;
             }
+            // flipped to FROM_SCRATCH in mergePQ if the checks below skip the leading segment merge
+            mergePath = "LEADING_SEGMENT_MERGE";
 
             var leadingFieldsReader = (PerFieldKnnVectorsFormat.FieldsReader) readers[LEADING_READER_IDX];
             var leadingReader = (JVectorReader) leadingFieldsReader.getFieldReader(fieldInfo.name);

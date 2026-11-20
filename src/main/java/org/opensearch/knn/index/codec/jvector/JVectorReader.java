@@ -83,6 +83,10 @@ public class JVectorReader extends KnnVectorsReader {
         }
     }
 
+    public SegmentInfo getSegmentInfo() {
+        return state.segmentInfo;
+    }
+
     @Override
     public void checkIntegrity() throws IOException {
         for (FieldEntry fieldEntry : fieldEntryMap.values()) {
