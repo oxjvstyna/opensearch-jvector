@@ -14,6 +14,8 @@ import java.nio.file.Path;
 import java.util.Arrays;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.Set;
+import java.util.stream.Collectors;
 
 import lombok.extern.log4j.Log4j2;
 import org.apache.lucene.document.*;
@@ -717,7 +719,8 @@ public class JVectorMergeWithDeletedDocsTests extends LuceneTestCase {
     @Test
     public void testMultipleMergesWithVariousDeletionPatterns() throws IOException {
         final int dimension = 64;
-        final int k = 5;
+        final int k = 10;
+        final int numQueries = 20;
 
         log.info("Testing multiple merges with various deletion patterns and overwrites");
 
@@ -728,6 +731,7 @@ public class JVectorMergeWithDeletedDocsTests extends LuceneTestCase {
         config.setMergeScheduler(new SerialMergeScheduler());
 
         final Path indexPath = createTempDir();
+        final Map<String, float[]> liveVectors = new HashMap<>();
 
         try (FSDirectory dir = FSDirectory.open(indexPath); IndexWriter writer = new IndexWriter(dir, config)) {
             int docId = 0;
@@ -739,15 +743,19 @@ public class JVectorMergeWithDeletedDocsTests extends LuceneTestCase {
             for (int i = 0; i < seg1Size; i++) {
                 Document doc = new Document();
                 float[] vector = randomVector(dimension);
+                String id = String.valueOf(docId);
                 doc.add(new KnnFloatVectorField(TEST_FIELD, vector, VectorSimilarityFunction.EUCLIDEAN));
-                doc.add(new StringField(TEST_ID_FIELD, String.valueOf(docId), Field.Store.YES));
+                doc.add(new StringField(TEST_ID_FIELD, id, Field.Store.YES));
                 writer.addDocument(doc);
+                liveVectors.put(id, vector);
                 docId++;
             }
             writer.commit();
             // Delete first 400 documents
             for (int i = seg1Start; i < seg1Start + 400; i++) {
-                writer.deleteDocuments(new Term(TEST_ID_FIELD, String.valueOf(i)));
+                String id = String.valueOf(i);
+                writer.deleteDocuments(new Term(TEST_ID_FIELD, id));
+                liveVectors.remove(id);
             }
             writer.commit();
             int seg1LiveDocs = seg1Size - 400;
@@ -759,9 +767,11 @@ public class JVectorMergeWithDeletedDocsTests extends LuceneTestCase {
             for (int i = 0; i < seg2Size; i++) {
                 Document doc = new Document();
                 float[] vector = randomVector(dimension);
+                String id = String.valueOf(docId);
                 doc.add(new KnnFloatVectorField(TEST_FIELD, vector, VectorSimilarityFunction.EUCLIDEAN));
-                doc.add(new StringField(TEST_ID_FIELD, String.valueOf(docId), Field.Store.YES));
+                doc.add(new StringField(TEST_ID_FIELD, id, Field.Store.YES));
                 writer.addDocument(doc);
+                liveVectors.put(id, vector);
                 docId++;
             }
             writer.commit();
@@ -770,9 +780,11 @@ public class JVectorMergeWithDeletedDocsTests extends LuceneTestCase {
             for (int i = seg2Start; i < seg2Start + 300; i++) {
                 Document doc = new Document();
                 float[] vector = randomVector(dimension); // Different vector values
+                String id = String.valueOf(i);
                 doc.add(new KnnFloatVectorField(TEST_FIELD, vector, VectorSimilarityFunction.EUCLIDEAN));
-                doc.add(new StringField(TEST_ID_FIELD, String.valueOf(i), Field.Store.YES));
-                writer.updateDocument(new Term(TEST_ID_FIELD, String.valueOf(i)), doc);
+                doc.add(new StringField(TEST_ID_FIELD, id, Field.Store.YES));
+                writer.updateDocument(new Term(TEST_ID_FIELD, id), doc);
+                liveVectors.put(id, vector);
             }
             writer.commit();
             int seg2LiveDocs = seg2Size; // Overwrites don't change live doc count
@@ -789,9 +801,11 @@ public class JVectorMergeWithDeletedDocsTests extends LuceneTestCase {
             for (int i = 0; i < seg3Size; i++) {
                 Document doc = new Document();
                 float[] vector = randomVector(dimension);
+                String id = String.valueOf(docId);
                 doc.add(new KnnFloatVectorField(TEST_FIELD, vector, VectorSimilarityFunction.EUCLIDEAN));
-                doc.add(new StringField(TEST_ID_FIELD, String.valueOf(docId), Field.Store.YES));
+                doc.add(new StringField(TEST_ID_FIELD, id, Field.Store.YES));
                 writer.addDocument(doc);
+                liveVectors.put(id, vector);
                 docId++;
             }
             writer.commit();
@@ -803,23 +817,29 @@ public class JVectorMergeWithDeletedDocsTests extends LuceneTestCase {
             for (int i = 0; i < seg4Size; i++) {
                 Document doc = new Document();
                 float[] vector = randomVector(dimension);
+                String id = String.valueOf(docId);
                 doc.add(new KnnFloatVectorField(TEST_FIELD, vector, VectorSimilarityFunction.EUCLIDEAN));
-                doc.add(new StringField(TEST_ID_FIELD, String.valueOf(docId), Field.Store.YES));
+                doc.add(new StringField(TEST_ID_FIELD, id, Field.Store.YES));
                 writer.addDocument(doc);
+                liveVectors.put(id, vector);
                 docId++;
             }
             writer.commit();
             // Delete 200 documents
             for (int i = seg4Start; i < seg4Start + 200; i++) {
-                writer.deleteDocuments(new Term(TEST_ID_FIELD, String.valueOf(i)));
+                String id = String.valueOf(i);
+                writer.deleteDocuments(new Term(TEST_ID_FIELD, id));
+                liveVectors.remove(id);
             }
             // Overwrite 200 different documents
             for (int i = seg4Start + 500; i < seg4Start + 700; i++) {
                 Document doc = new Document();
                 float[] vector = randomVector(dimension);
+                String id = String.valueOf(i);
                 doc.add(new KnnFloatVectorField(TEST_FIELD, vector, VectorSimilarityFunction.EUCLIDEAN));
-                doc.add(new StringField(TEST_ID_FIELD, String.valueOf(i), Field.Store.YES));
-                writer.updateDocument(new Term(TEST_ID_FIELD, String.valueOf(i)), doc);
+                doc.add(new StringField(TEST_ID_FIELD, id, Field.Store.YES));
+                writer.updateDocument(new Term(TEST_ID_FIELD, id), doc);
+                liveVectors.put(id, vector);
             }
             writer.commit();
             int seg4LiveDocs = seg4Size - 200; // Only explicit deletions reduce count
@@ -837,9 +857,11 @@ public class JVectorMergeWithDeletedDocsTests extends LuceneTestCase {
             for (int i = 0; i < seg5Size; i++) {
                 Document doc = new Document();
                 float[] vector = randomVector(dimension);
+                String id = String.valueOf(docId);
                 doc.add(new KnnFloatVectorField(TEST_FIELD, vector, VectorSimilarityFunction.EUCLIDEAN));
-                doc.add(new StringField(TEST_ID_FIELD, String.valueOf(docId), Field.Store.YES));
+                doc.add(new StringField(TEST_ID_FIELD, id, Field.Store.YES));
                 writer.addDocument(doc);
+                liveVectors.put(id, vector);
                 docId++;
             }
             writer.commit();
@@ -848,9 +870,11 @@ public class JVectorMergeWithDeletedDocsTests extends LuceneTestCase {
             for (int i = seg5Start; i < seg5Start + seg5Size; i++) {
                 Document doc = new Document();
                 float[] vector = randomVector(dimension);
+                String id = String.valueOf(i);
                 doc.add(new KnnFloatVectorField(TEST_FIELD, vector, VectorSimilarityFunction.EUCLIDEAN));
-                doc.add(new StringField(TEST_ID_FIELD, String.valueOf(i), Field.Store.YES));
-                writer.updateDocument(new Term(TEST_ID_FIELD, String.valueOf(i)), doc);
+                doc.add(new StringField(TEST_ID_FIELD, id, Field.Store.YES));
+                writer.updateDocument(new Term(TEST_ID_FIELD, id), doc);
+                liveVectors.put(id, vector);
             }
             writer.commit();
             int seg5LiveDocs = seg5Size; // Overwrites maintain count
@@ -862,16 +886,20 @@ public class JVectorMergeWithDeletedDocsTests extends LuceneTestCase {
             for (int i = 0; i < seg6Size; i++) {
                 Document doc = new Document();
                 float[] vector = randomVector(dimension);
+                String id = String.valueOf(docId);
                 doc.add(new KnnFloatVectorField(TEST_FIELD, vector, VectorSimilarityFunction.EUCLIDEAN));
-                doc.add(new StringField(TEST_ID_FIELD, String.valueOf(docId), Field.Store.YES));
+                doc.add(new StringField(TEST_ID_FIELD, id, Field.Store.YES));
                 writer.addDocument(doc);
+                liveVectors.put(id, vector);
                 docId++;
             }
             writer.commit();
             // Delete every 10th document (scattered pattern)
             log.info("Deleting scattered documents (every 10th) in segment 6");
             for (int i = seg6Start; i < seg6Start + seg6Size; i += 10) {
-                writer.deleteDocuments(new Term(TEST_ID_FIELD, String.valueOf(i)));
+                String id = String.valueOf(i);
+                writer.deleteDocuments(new Term(TEST_ID_FIELD, id));
+                liveVectors.remove(id);
             }
             writer.commit();
             int seg6LiveDocs = seg6Size - (seg6Size / 10); // ~10% deleted
@@ -883,9 +911,11 @@ public class JVectorMergeWithDeletedDocsTests extends LuceneTestCase {
             for (int i = 0; i < seg7Size; i++) {
                 Document doc = new Document();
                 float[] vector = randomVector(dimension);
+                String id = String.valueOf(docId);
                 doc.add(new KnnFloatVectorField(TEST_FIELD, vector, VectorSimilarityFunction.EUCLIDEAN));
-                doc.add(new StringField(TEST_ID_FIELD, String.valueOf(docId), Field.Store.YES));
+                doc.add(new StringField(TEST_ID_FIELD, id, Field.Store.YES));
                 writer.addDocument(doc);
+                liveVectors.put(id, vector);
                 docId++;
             }
             writer.commit();
@@ -894,9 +924,11 @@ public class JVectorMergeWithDeletedDocsTests extends LuceneTestCase {
             for (int i = seg7Start; i < seg7Start + 1000; i++) {
                 Document doc = new Document();
                 float[] vector = randomVector(dimension);
+                String id = String.valueOf(i);
                 doc.add(new KnnFloatVectorField(TEST_FIELD, vector, VectorSimilarityFunction.EUCLIDEAN));
-                doc.add(new StringField(TEST_ID_FIELD, String.valueOf(i), Field.Store.YES));
-                writer.updateDocument(new Term(TEST_ID_FIELD, String.valueOf(i)), doc);
+                doc.add(new StringField(TEST_ID_FIELD, id, Field.Store.YES));
+                writer.updateDocument(new Term(TEST_ID_FIELD, id), doc);
+                liveVectors.put(id, vector);
             }
             writer.commit();
             int seg7LiveDocs = seg7Size; // Overwrites maintain count
@@ -909,15 +941,15 @@ public class JVectorMergeWithDeletedDocsTests extends LuceneTestCase {
 
             int expectedLiveDocs = seg1LiveDocs + seg2LiveDocs + seg3Size + seg4LiveDocs + seg5LiveDocs + seg6LiveDocs + seg7LiveDocs;
             log.info(
-                "Total expected live docs: {} (seg1:{}, seg2:{}, seg3:{}, seg4:{}, seg5:{}, seg6:{}, seg7:{})",
-                expectedLiveDocs,
-                seg1LiveDocs,
-                seg2LiveDocs,
-                seg3Size,
-                seg4LiveDocs,
-                seg5LiveDocs,
-                seg6LiveDocs,
-                seg7LiveDocs
+                    "Total expected live docs: {} (seg1:{}, seg2:{}, seg3:{}, seg4:{}, seg5:{}, seg6:{}, seg7:{})",
+                    expectedLiveDocs,
+                    seg1LiveDocs,
+                    seg2LiveDocs,
+                    seg3Size,
+                    seg4LiveDocs,
+                    seg5LiveDocs,
+                    seg6LiveDocs,
+                    seg7LiveDocs
             );
 
             // Final force merge
@@ -926,30 +958,54 @@ public class JVectorMergeWithDeletedDocsTests extends LuceneTestCase {
             writer.commit();
             log.info("Force merge completed successfully");
 
-            // Verify the merged index
+            // Verify the merged index against ground truth
             try (IndexReader reader = DirectoryReader.open(writer)) {
                 Assert.assertEquals("Should have 1 segment after merge", 1, reader.getContext().leaves().size());
                 Assert.assertEquals("Should have correct number of live docs", expectedLiveDocs, reader.numDocs());
+                Assert.assertEquals("Live vectors map should match live docs", expectedLiveDocs, liveVectors.size());
 
-                // Verify search works correctly
-                final float[] target = new float[dimension];
-                Arrays.fill(target, 0.5f);
                 final IndexSearcher searcher = newSearcher(reader);
-                JVectorKnnFloatVectorQuery query = getJVectorKnnFloatVectorQuery(TEST_FIELD, target, k, new MatchAllDocsQuery());
-                TopDocs topDocs = searcher.search(query, k);
-                Assert.assertEquals("Should return k results", k, topDocs.totalHits.value());
+                double totalRecall = 0.0;
 
-                // Verify that overwritten documents have updated vectors
-                log.info("Verifying overwritten documents have updated vectors");
-                for (int i = 0; i < topDocs.scoreDocs.length; i++) {
-                    Document doc = reader.storedFields().document(topDocs.scoreDocs[i].doc);
-                    String id = doc.get(TEST_ID_FIELD);
-                    log.info("Result {}: doc ID = {}", i, id);
+                for (int q = 0; q < numQueries; q++) {
+                    final float[] target = randomVector(dimension);
+                    final Set<String> expectedTopK = computeGroundTruth(liveVectors, target, k);
+
+                    JVectorKnnFloatVectorQuery query = getJVectorKnnFloatVectorQuery(TEST_FIELD, target, k, new MatchAllDocsQuery());
+                    TopDocs topDocs = searcher.search(query, k);
+                    Assert.assertEquals("Should return k results", k, topDocs.scoreDocs.length);
+
+                    int hits = 0;
+                    for (ScoreDoc scoreDoc : topDocs.scoreDocs) {
+                        Document doc = reader.storedFields().document(scoreDoc.doc);
+                        String id = doc.get(TEST_ID_FIELD);
+                        Assert.assertTrue("Returned deleted doc ID: " + id, liveVectors.containsKey(id));
+                        if (expectedTopK.contains(id)) {
+                            hits++;
+                        }
+                    }
+                    totalRecall += (double) hits / k;
                 }
+
+                double avgRecall = totalRecall / numQueries;
+                log.info("Average recall@{} over {} queries: {}", k, numQueries, avgRecall);
+                Assert.assertTrue("Average recall too low: " + avgRecall, avgRecall >= 0.7);
 
                 log.info("Comprehensive test passed! All deletion and overwrite scenarios handled correctly");
             }
         }
+    }
+
+    private Set<String> computeGroundTruth(Map<String, float[]> liveVectors, float[] target, int k) {
+        return liveVectors.entrySet()
+                .stream()
+                .sorted((a, b) -> Float.compare(
+                        VectorSimilarityFunction.EUCLIDEAN.compare(target, b.getValue()),
+                        VectorSimilarityFunction.EUCLIDEAN.compare(target, a.getValue())
+                ))
+                .limit(k)
+                .map(Map.Entry::getKey)
+                .collect(Collectors.toSet());
     }
 
     /**
