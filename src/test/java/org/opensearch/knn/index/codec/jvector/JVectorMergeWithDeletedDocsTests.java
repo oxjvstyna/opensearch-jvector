@@ -929,15 +929,7 @@ public class JVectorMergeWithDeletedDocsTests extends LuceneTestCase {
                 final float[] target = new float[dimension];
                 Arrays.fill(target, 0.5f);
                 final IndexSearcher searcher = newSearcher(reader);
-                JVectorKnnFloatVectorQuery query = new JVectorKnnFloatVectorQuery(
-                    TEST_FIELD,
-                    target,
-                    k,
-                    new MatchAllDocsQuery(),
-                    20,
-                    KNNConstants.DEFAULT_QUERY_SIMILARITY_THRESHOLD.floatValue(),
-                    KNNConstants.DEFAULT_QUERY_RERANK_FLOOR.floatValue()
-                );
+                JVectorKnnFloatVectorQuery query = getJVectorKnnFloatVectorQuery(TEST_FIELD, target, k, new MatchAllDocsQuery());
                 TopDocs topDocs = searcher.search(query, k);
                 Assert.assertEquals("Should return k results", k, topDocs.totalHits.value());
 
