@@ -1147,9 +1147,7 @@ public class JVectorWriter extends KnnVectorsWriter {
                         fieldName,
                         mergeState.segmentInfo.name
                     );
-                    // refine() returns a new ProductQuantization, so encode with the returned (refined) one
-                    final ProductQuantization refinedCompressor = leadingCompressor.refine(compactRavv);
-                    compactPqVectors = PQVectors.encodeAndBuild(refinedCompressor, compactRavv.size(), compactRavv, simdPoolMerge);
+                    compactPqVectors = PQVectors.encodeAndBuild(leadingCompressor, compactRavv.size(), compactRavv, simdPoolMerge);
                 }
 
                 if (compactPqVectors == null) {
